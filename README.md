@@ -1,6 +1,6 @@
 # EasyPrint for Clubs
 
-This repository helps club organizers print a bunch of small flyers on a single piece of paper for distribution. No longer do you have to deal with extra margins or spacing issues. Currently works with image formats png, jpeg, and webp and also pdfs. Also, sometimes on Linux, printing multiple copies can be... inconvenient, so instead, just print one copy with multiple pages.
+This repository helps club organizers print a bunch of small flyers on a single piece of paper for distribution. No longer do you have to deal with extra margins or spacing issues. Currently works with image formats png, jpeg, and webp and also pdfs. Also, sometimes on Linux, printing multiple copies can be, well, inconvenient, so instead, just print one copy with multiple pages.
 
 ## Installing Libraries
 
