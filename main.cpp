@@ -4,6 +4,7 @@
 #include <cairo-pdf.h>
 #include <cmath>
 #include <memory>
+#include <vector>
 
 // Poppler
 #include <poppler/cpp/poppler-document.h>
@@ -21,14 +22,32 @@ static bool ends_with(const std::string& s, const std::string& suffix) {
 int main(int argc, char** argv) {
     if (argc < 2) {
         std::cerr << "Usage: " << argv[0]
-                  << " input.(png|jpg|webp|pdf) [output.pdf] [num_pages] [images_per_page]\n";
+                  << " [--business-card] input.(png|jpg|webp|pdf) [output.pdf] [num_pages] [images_per_page]\n";
         return 1;
     }
 
-    std::string input_path = argv[1];
-    std::string pdf_path   = (argc >= 3) ? argv[2] : "output.pdf";
-    int pages             = (argc >= 4) ? std::atoi(argv[3]) : 1;
-    int images_per_page    = (argc >= 5) ? std::atoi(argv[4]) : 1;
+    bool business_card_mode = false;
+    std::vector<std::string> positional_args;
+    positional_args.reserve(argc - 1);
+
+    for (int i = 1; i < argc; ++i) {
+        std::string arg = argv[i];
+        if (arg == "--business-card") {
+            business_card_mode = true;
+        } else {
+            positional_args.push_back(arg);
+        }
+    }
+
+    if (positional_args.empty()) {
+        std::cerr << "Missing input path\n";
+        return 1;
+    }
+
+    std::string input_path = positional_args[0];
+    std::string pdf_path   = (positional_args.size() >= 2) ? positional_args[1] : "output.pdf";
+    int pages              = (positional_args.size() >= 3) ? std::atoi(positional_args[2].c_str()) : 1;
+    int images_per_page    = (positional_args.size() >= 4) ? std::atoi(positional_args[3].c_str()) : 1;
 
     if (pages < 1 || images_per_page < 1) {
         std::cerr << "Invalid pages or images_per_page\n";
@@ -153,11 +172,30 @@ int main(int argc, char** argv) {
 
     int cols = std::ceil(std::sqrt(images_per_page));
     int rows = std::ceil(static_cast<double>(images_per_page) / cols);
-
     double cell_width =
         (usable_width - (cols - 1) * image_gap) / cols;
     double cell_height =
         (usable_height - (rows - 1) * image_gap) / rows;
+
+    double layout_start_x = margin;
+    double layout_start_y = margin;
+    double layout_gap = image_gap;
+
+    if (business_card_mode) {
+        // 3.5" x 2.0" landscape business cards on Letter paper.
+        cols = 2;
+        rows = 5;
+        images_per_page = cols * rows;
+        cell_width = 3.5 * 72.0;
+        cell_height = 2.0 * 72.0;
+        layout_gap = 0.25 * 72.0;  // 0.25" spacing between cards.
+
+        const double grid_width = cols * cell_width + (cols - 1) * layout_gap;
+        const double grid_height = rows * cell_height + (rows - 1) * layout_gap;
+
+        layout_start_x = (page_width - grid_width) / 2.0;
+        layout_start_y = (page_height - grid_height) / 2.0;
+    }
     
     cairo_surface_t* pdf_surface =
         cairo_pdf_surface_create(pdf_path.c_str(), page_width, page_height);
@@ -177,20 +215,25 @@ int main(int argc, char** argv) {
 
     /* ---------- DRAW ---------- */
 
+    const bool rotate_to_landscape = img_height > img_width;
+    const int oriented_width = rotate_to_landscape ? img_height : img_width;
+    const int oriented_height = rotate_to_landscape ? img_width : img_height;
+    const double kPi = 3.14159265358979323846;
+
     for (int p = 0; p < pages; ++p) {
         for (int i = 0; i < images_per_page; ++i) {
             int row = i / cols;
             int col = i % cols;
 
-            double x = margin + col * (cell_width + image_gap);
-            double y = margin + row * (cell_height + image_gap);
+            double x = layout_start_x + col * (cell_width + layout_gap);
+            double y = layout_start_y + row * (cell_height + layout_gap);
 
             double scale =
-                std::min(cell_width / img_width,
-                         cell_height / img_height);
+                std::min(cell_width / oriented_width,
+                         cell_height / oriented_height);
 
-            double draw_w = img_width  * scale;
-            double draw_h = img_height * scale;
+            double draw_w = oriented_width  * scale;
+            double draw_h = oriented_height * scale;
 
             double offset_x = (cell_width - draw_w) / 2.0;
             double offset_y = (cell_height - draw_h) / 2.0;
@@ -198,9 +241,27 @@ int main(int argc, char** argv) {
             cairo_save(cr);
             cairo_translate(cr, x + offset_x, y + offset_y);
             cairo_scale(cr, scale, scale);
+            if (rotate_to_landscape) {
+                // Rotate 90 degrees so portrait sources print in landscape.
+                cairo_translate(cr, img_height, 0.0);
+                cairo_rotate(cr, kPi / 2.0);
+            }
             cairo_set_source_surface(cr, image_surface, 0, 0);
             cairo_paint(cr);
             cairo_restore(cr);
+
+            if (business_card_mode) {
+                // Dotted cut guide around each 3.5" x 2.0" card.
+                cairo_save(cr);
+                cairo_set_source_rgb(cr, 0.25, 0.25, 0.25);
+                cairo_set_line_width(cr, 0.8);
+                cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+                double dot_pattern[] = {0.01, 4.0};
+                cairo_set_dash(cr, dot_pattern, 2, 0.0);
+                cairo_rectangle(cr, x, y, cell_width, cell_height);
+                cairo_stroke(cr);
+                cairo_restore(cr);
+            }
         }
 
         if (p < pages - 1) {
