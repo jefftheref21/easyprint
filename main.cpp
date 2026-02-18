@@ -22,11 +22,20 @@ static bool ends_with(const std::string& s, const std::string& suffix) {
 int main(int argc, char** argv) {
     if (argc < 2) {
         std::cerr << "Usage: " << argv[0]
-                  << " [--business-card] input.(png|jpg|webp|pdf) [output.pdf] [num_pages] [images_per_page]\n";
+                  << " [--business-card] [--landscape|--portrait] input.(png|jpg|webp|pdf) [output.pdf] [num_pages] [images_per_page]\n";
         return 1;
     }
 
+    enum class OrientationMode {
+        Auto,
+        Portrait,
+        Landscape
+    };
+
     bool business_card_mode = false;
+    OrientationMode orientation_mode = OrientationMode::Auto;
+    bool landscape_flag_set = false;
+    bool portrait_flag_set = false;
     std::vector<std::string> positional_args;
     positional_args.reserve(argc - 1);
 
@@ -34,9 +43,20 @@ int main(int argc, char** argv) {
         std::string arg = argv[i];
         if (arg == "--business-card") {
             business_card_mode = true;
+        } else if (arg == "--landscape") {
+            landscape_flag_set = true;
+            orientation_mode = OrientationMode::Landscape;
+        } else if (arg == "--portrait") {
+            portrait_flag_set = true;
+            orientation_mode = OrientationMode::Portrait;
         } else {
             positional_args.push_back(arg);
         }
+    }
+
+    if (landscape_flag_set && portrait_flag_set) {
+        std::cerr << "Choose only one orientation flag: --landscape or --portrait\n";
+        return 1;
     }
 
     if (positional_args.empty()) {
@@ -215,9 +235,24 @@ int main(int argc, char** argv) {
 
     /* ---------- DRAW ---------- */
 
-    const bool rotate_to_landscape = img_height > img_width;
-    const int oriented_width = rotate_to_landscape ? img_height : img_width;
-    const int oriented_height = rotate_to_landscape ? img_width : img_height;
+    // Choose default orientation based on which one fits the target cell better.
+    const double portrait_scale =
+        std::min(cell_width / static_cast<double>(img_width),
+                 cell_height / static_cast<double>(img_height));
+    const double landscape_scale =
+        std::min(cell_width / static_cast<double>(img_height),
+                 cell_height / static_cast<double>(img_width));
+
+    const bool default_landscape = (landscape_scale > portrait_scale) ||
+                                   (business_card_mode && landscape_scale == portrait_scale);
+    const bool use_landscape = orientation_mode == OrientationMode::Landscape
+                                   ? true
+                                   : orientation_mode == OrientationMode::Portrait
+                                         ? false
+                                         : default_landscape;
+
+    const int oriented_width = use_landscape ? img_height : img_width;
+    const int oriented_height = use_landscape ? img_width : img_height;
     const double kPi = 3.14159265358979323846;
 
     for (int p = 0; p < pages; ++p) {
@@ -241,8 +276,8 @@ int main(int argc, char** argv) {
             cairo_save(cr);
             cairo_translate(cr, x + offset_x, y + offset_y);
             cairo_scale(cr, scale, scale);
-            if (rotate_to_landscape) {
-                // Rotate 90 degrees so portrait sources print in landscape.
+            if (use_landscape) {
+                // Rotate 90 degrees so output is landscape-oriented.
                 cairo_translate(cr, img_height, 0.0);
                 cairo_rotate(cr, kPi / 2.0);
             }
